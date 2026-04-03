@@ -64,15 +64,21 @@ DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = os.environ.get("DB_PORT")
 DB_NAME = os.environ.get("DB_NAME")
 
+import ssl
+
 engine = create_engine(
     f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
     pool_pre_ping=True,
     connect_args={
         "ssl": {
-            "check_hostname": False
+            "ssl": ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         }
     }
 )
+
+# 🔥 Disable verification
+engine.connect().connection.connection._sock.context.check_hostname = False
+engine.connect().connection.connection._sock.context.verify_mode = ssl.CERT_NONE
 
 # ======================
 # ✅ GCS CONFIG
