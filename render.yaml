@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: shops-me-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app2:app
+    envVars:
+      - key: DB_USER
+        value: root
+      - key: DB_PASS
+        value: ""
+      - key: DB_HOST
+        value: localhost
+      - key: DB_NAME
+        value: swiggy_restaurant
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/firebase-key.json

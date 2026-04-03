@@ -1,0 +1,14 @@
+Flask==3.0.0
+flask-cors==4.0.0
+pymysql==1.1.0
+SQLAlchemy==2.0.23
+google-cloud-storage==2.13.0
+firebase-admin==6.3.0
+gunicorn==21.2.0
+python-dotenv==1.0.0
+bcrypt==4.1.2
+apscheduler==3.10.4
+pandas==3.0.2
+openpyxl==3.1.2
+Werkzeug==3.0.1
+flask-cors
