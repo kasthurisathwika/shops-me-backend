@@ -75,10 +75,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SSL_CA = os.path.join(BASE_DIR, "ca.pem")
 
 engine = create_engine(
-    f"mysql+pymysql://{DB_USER}:{quote_plus(DB_PASS)}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
+    f"mysql+pymysql://{quote_plus(DB_USER)}:{quote_plus(DB_PASS)}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
     pool_pre_ping=True,
     connect_args={
-        "ssl": {"ca": "/etc/ssl/certs/ca-certificates.crt"}
+        "ssl": {"ssl_disabled": True}  # ✅ skip SSL verification for Aiven
     }
 )
 
