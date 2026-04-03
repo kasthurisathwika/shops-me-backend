@@ -32,6 +32,7 @@ import firebase_admin
 from firebase_admin import credentials, messaging
 import pymysql
 pymysql.install_as_MySQLdb()
+import ssl
 
 app = Flask(__name__)
 
@@ -64,17 +65,18 @@ DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = os.environ.get("DB_PORT")
 DB_NAME = os.environ.get("DB_NAME")
 
-import ssl
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SSL_CA = os.path.join(BASE_DIR, "ca.pem")
 
 engine = create_engine(
     f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
     pool_pre_ping=True,
     connect_args={
-        "ssl": {"check_hostname": False},
-        "ssl_disabled": False
+        "ssl": {
+            "ca": SSL_CA
+        }
     }
 )
-
 # 🔥 Disable verification
 engine.connect().connection.connection._sock.context.check_hostname = False
 engine.connect().connection.connection._sock.context.verify_mode = ssl.CERT_NONE
