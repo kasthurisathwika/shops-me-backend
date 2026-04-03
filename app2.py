@@ -12,14 +12,15 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import datetime as dt
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
 import os
 import re
-import time
+import datetime as dt
+import time as time_module
 import mimetypes
 import bcrypt
 import secrets
@@ -65,6 +66,11 @@ DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = os.environ.get("DB_PORT")
 DB_NAME = os.environ.get("DB_NAME")
 
+missing = [k for k, v in {"DB_USER": DB_USER, "DB_PASS": DB_PASS, 
+           "DB_HOST": DB_HOST, "DB_PORT": DB_PORT, "DB_NAME": DB_NAME}.items() if not v]
+if missing:
+    raise RuntimeError(f"❌ Missing env vars: {missing}")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SSL_CA = os.path.join(BASE_DIR, "ca.pem")
 
@@ -105,18 +111,23 @@ ALLOWED_IMAGE_EXT = {"png", "jpg", "jpeg", "webp"}
 firebase_app = None
 firebase_cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH")
 try:
-    firebase_cred = credentials.Certificate(firebase_cred_path)
-
-    if not firebase_admin._apps:
-        firebase_app = firebase_admin.initialize_app(firebase_cred)
+    if firebase_cred_path:  # ✅ add this check
+        firebase_cred = credentials.Certificate(firebase_cred_path)
+        if not firebase_admin._apps:
+            firebase_app = firebase_admin.initialize_app(firebase_cred)
+        else:
+            firebase_app = firebase_admin.get_app()
+            print("🔥 Firebase project:", firebase_app.project_id)   # ✅ IMPORTANT
     else:
-        firebase_app = firebase_admin.get_app()
-
-    print("🔥 Firebase project:", firebase_app.project_id)   # ✅ IMPORTANT
-
+        print("⚠️ FIREBASE_CREDENTIALS_PATH not set. Push notifications disabled.")
+        
 except Exception as e:
     print("⚠️ Firebase Admin init failed:", e)
     firebase_app = None
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "service": "shops-me-backend"}), 200
     
 # ======================
 # GCS HELPERS
@@ -154,7 +165,7 @@ def upload_file_to_gcs(file_storage, folder: str) -> str:
     if not allowed_image(original_name):
         raise ValueError("Only png/jpg/jpeg/webp images allowed")
 
-    ts = int(time.time())
+    ts = int(time_module.time())
     object_path = f"{folder.rstrip('/')}/{ts}_{original_name}"
 
     blob = gcs_bucket.blob(object_path)
