@@ -69,7 +69,7 @@ engine = create_engine(
     pool_pre_ping=True,
     connect_args={
         "ssl": {
-            "ssl": {}
+            "check_hostname": False
         }
     }
 )
