@@ -77,9 +77,6 @@ engine = create_engine(
         }
     }
 )
-# 🔥 Disable verification
-engine.connect().connection.connection._sock.context.check_hostname = False
-engine.connect().connection.connection._sock.context.verify_mode = ssl.CERT_NONE
 
 # ======================
 # ✅ GCS CONFIG
