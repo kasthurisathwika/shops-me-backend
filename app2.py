@@ -71,7 +71,7 @@ engine = create_engine(
     pool_pre_ping=True,
     connect_args={
         "ssl": {
-            "ssl": ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            "ca": "ca.pem"
         }
     }
 )
