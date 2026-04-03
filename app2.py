@@ -69,7 +69,7 @@ engine = create_engine(
     pool_pre_ping=True,
     connect_args={
         "ssl": {
-            "ca": "/etc/ssl/certs/ca-certificates.crt"
+            "ssl_ca": "/etc/ssl/certs/ca-certificates.crt"
         }
     }
 )
