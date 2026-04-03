@@ -1,17 +1,23 @@
 services:
   - type: web
-    name: shops-me-backend
+    name: swiggy-restaurant-api
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app2:app
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
+      - key: PORT
+        value: 10000
+      - key: FLASK_ENV
+        value: production
       - key: DB_USER
-        value: root
+        sync: false
       - key: DB_PASS
-        value: ""
+        sync: false
       - key: DB_HOST
-        value: localhost
+        sync: false
       - key: DB_NAME
-        value: swiggy_restaurant
+        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/secrets/firebase-key.json
+        sync: false
+      - key: FIREBASE_CREDENTIALS_PATH
+        sync: false
