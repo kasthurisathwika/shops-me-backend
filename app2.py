@@ -70,9 +70,8 @@ engine = create_engine(
     f"mysql+pymysql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
     pool_pre_ping=True,
     connect_args={
-        "ssl": {
-            "ca": "ca.pem"
-        }
+        "ssl": {"check_hostname": False},
+        "ssl_disabled": False
     }
 )
 
