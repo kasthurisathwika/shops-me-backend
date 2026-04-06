@@ -694,16 +694,6 @@ def media_list():
             "details": str(e)
         }), 500
 
-@app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get("Origin")
-    if origin in ("http://localhost:5173", "http://127.0.0.1:5173"):
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    return response
-
 # ======================
 # STORE ROUTES (Restaurant DB)
 # Keep OLD route names
@@ -1687,42 +1677,50 @@ def admin_meta_customers():
     return jsonify([{"id": r["customer_id"], "name": r.get("name"), "phone": r["phone"]} for r in rows]), 200
 
 # for notifications 
+# ❌ Your current code updates stores/riders tables directly
+# But customers use customer_fcm_tokens table
+# This is inconsistent — fix:
+
 @app.route("/save-fcm-token", methods=["POST"])
 def save_fcm_token():
     data = request.get_json()
-
     user_id = data.get("user_id")
     fcm_token = data.get("fcm_token")
-    user_type = data.get("user_type", "CUSTOMER")
+    user_type = (data.get("user_type") or "CUSTOMER").upper()
 
     if not user_id or not fcm_token:
         return jsonify({"error": "Missing parameters"}), 400
 
-    table_map = {
-        "CUSTOMER": "customers",
-        "STORE": "stores",
-        "DELIVERYMAN": "riders",
-        #"RIDER": "riders"   # allow this alias
-    }
-
-    id_column_map = {
-        "CUSTOMER": "customer_id",
-        "STORE": "store_id",
-        "DELIVERYMAN": "rider_id"
-    }
-
-    table = table_map.get(user_type.upper())
-    id_column = id_column_map.get(user_type.upper())
-
-    if not table or not id_column:
-        return jsonify({"error": "Invalid userType"}), 400
-
     with engine.begin() as conn:
-        conn.execute(text(f"""
-            UPDATE {table}
-            SET fcm_token=:token
-            WHERE {id_column}=:id
-        """), {"token": fcm_token, "id": user_id})
+        if user_type == "CUSTOMER":
+            # ✅ use customer_fcm_tokens table (same as /customer/fcm-token)
+            existing = conn.execute(text("""
+                SELECT token_id FROM customer_fcm_tokens
+                WHERE customer_id = :cid AND fcm_token = :tok LIMIT 1
+            """), {"cid": user_id, "tok": fcm_token}).mappings().first()
+
+            if existing:
+                conn.execute(text("""
+                    UPDATE customer_fcm_tokens
+                    SET is_active = 1, updated_at = NOW()
+                    WHERE token_id = :tid
+                """), {"tid": int(existing["token_id"])})
+            else:
+                conn.execute(text("""
+                    INSERT INTO customer_fcm_tokens
+                    (customer_id, fcm_token, device_type, is_active)
+                    VALUES (:cid, :tok, 'android', 1)
+                """), {"cid": user_id, "tok": fcm_token})
+
+        elif user_type == "STORE":
+            conn.execute(text("""
+                UPDATE stores SET fcm_token = :tok WHERE store_id = :id
+            """), {"tok": fcm_token, "id": user_id})
+
+        elif user_type == "DELIVERYMAN":
+            conn.execute(text("""
+                UPDATE riders SET fcm_token = :tok WHERE rider_id = :id
+            """), {"tok": fcm_token, "id": user_id})
 
     return jsonify({"success": True}), 200
 
