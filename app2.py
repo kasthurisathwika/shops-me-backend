@@ -8413,22 +8413,28 @@ def _create_weekly_app_review_prompts():
         print("⚠️ Weekly app review job error:", e)
 
 
-_scheduler = BackgroundScheduler(daemon=True)
-_scheduler.add_job(
-    _create_weekly_app_review_prompts,
-    trigger="cron",
-    day_of_week="mon",
-    hour=10,
-    minute=0,
-)
-
-# Only start in the main process, not in Gunicorn worker forks
-if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
+def _start_scheduler():
     try:
+        _scheduler = BackgroundScheduler(daemon=True)
+        _scheduler.add_job(
+            _create_weekly_app_review_prompts,
+            trigger="cron",
+            day_of_week="mon",
+            hour=10,
+            minute=0,
+        )
         _scheduler.start()
         atexit.register(lambda: _scheduler.shutdown(wait=False))
+        print("✅ Scheduler started successfully")
     except Exception as e:
-        print(f"⚠️ Scheduler start failed: {e}")
+        print(f"⚠️ Scheduler failed to start: {e}")
+
+# Only start scheduler in main process, not during gunicorn worker boot
+if os.environ.get("FLASK_ENV") != "production":
+    _start_scheduler()
+else:
+    # In production use gunicorn --preload which starts once in master
+    _start_scheduler()
 
 
 @app.route("/categories", methods=["GET"])
