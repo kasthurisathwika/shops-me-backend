@@ -26,6 +26,7 @@ import bcrypt
 import secrets
 import json
 import uuid
+import atexit
 from werkzeug.utils import secure_filename
 from google.cloud import storage
 from urllib.parse import quote_plus
@@ -8412,7 +8413,7 @@ def _create_weekly_app_review_prompts():
         print("⚠️ Weekly app review job error:", e)
 
 
-_scheduler = BackgroundScheduler()
+_scheduler = BackgroundScheduler(daemon=True)
 _scheduler.add_job(
     _create_weekly_app_review_prompts,
     trigger="cron",
@@ -8420,7 +8421,14 @@ _scheduler.add_job(
     hour=10,
     minute=0,
 )
-_scheduler.start()
+
+# Only start in the main process, not in Gunicorn worker forks
+if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
+    try:
+        _scheduler.start()
+        atexit.register(lambda: _scheduler.shutdown(wait=False))
+    except Exception as e:
+        print(f"⚠️ Scheduler start failed: {e}")
 
 
 @app.route("/categories", methods=["GET"])
