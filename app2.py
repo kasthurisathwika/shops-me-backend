@@ -1504,7 +1504,7 @@ ALLOWED_IMAGE_EXT_DOTTED = {".png", ".jpg", ".jpeg", ".webp"}
 
 def _image_ext_ok(filename: str) -> str:
     ext = os.path.splitext(filename or "")[1].lower()
-    return ext if ext in ALLOWED_IMAGE_EXT else ""
+    return ext if ext in ALLOWED_IMAGE_EXT_DOTTED else ""  # ✅ use dotted set
 
 
 def _save_notification_image(file_storage):
