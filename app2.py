@@ -3415,14 +3415,14 @@ def admin_edit_item(menu_item_id):
 
     if "short_description" in data:
         updates_item["description_short"] = empty_to_none(str(data.get("short_description") or "").strip())
+    
+    # ✅ ADD THIS
+    if "sub_category" in data:
+        updates_item["sub_category"] = empty_to_none(str(data.get("sub_category") or "").strip())
 
     if "category" in data or "section_name" in data:
         # will map to section_id
         pass
-
-    # ✅ ADD this block inside admin_edit_item, after the "short_description" block:
-    if "sub_category" in data:
-        updates_item["sub_category"] = empty_to_none(str(data.get("sub_category") or "").strip())
 
     if "is_veg" in data:
         updates_item["is_veg"] = 1 if str(data.get("is_veg") or "").strip().lower() in ("1", "true", "yes") else 0
