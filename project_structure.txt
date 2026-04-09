@@ -1,0 +1,23 @@
+Folder PATH listing for volume Windows
+Volume serial number is EA37-06AE
+C:.
+    .dockerignore
+    .env
+    .gitignore
+    app2 - Copy (2).py
+    app2.py
+    ca.pem
+    compose.yaml
+    Dockerfile
+    firebase.json
+    import_excel_to_mysql.py
+    Procfile
+    project_structure.txt
+    README.Docker.md
+    render.yaml
+    requirements.txt
+    runtime.txt
+    shopsandme-5ae10de858cf.json
+    
+No subfolders exist 
+

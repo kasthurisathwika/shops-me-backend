@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
-
 import os
 import re
 import datetime as dt
@@ -3370,17 +3369,19 @@ def admin_add_item():
             return jsonify({"error": "Store not found"}), 404
 
         section_id = get_or_create_section(conn, store_id, section_name) if section_name else None
+        sub_category_val = empty_to_none(data.get("sub_category"))
 
         conn.execute(text("""
             INSERT INTO menu_items
-            (store_id, section_id, name, description_short, image_url, is_veg, is_egg, status, sort_order)
+            (store_id, section_id, name, description_short, sub_category, image_url, is_veg, is_egg, status, sort_order)
             VALUES
-            (:store_id, :section_id, :name, :desc, :image_url, :is_veg, :is_egg, 'ACTIVE', 0)
+            (:store_id, :section_id, :name, :desc, :sub_category, :image_url, :is_veg, :is_egg, 'ACTIVE', 0)
         """), {
             "store_id": store_id,
             "section_id": section_id,
             "name": item_name,
             "desc": empty_to_none(data.get("short_description")),
+            "sub_category": sub_category_val,
             "image_url": empty_to_none(image_url_value),
             "is_veg": is_veg,
             "is_egg": is_egg,
@@ -3418,6 +3419,10 @@ def admin_edit_item(menu_item_id):
     if "category" in data or "section_name" in data:
         # will map to section_id
         pass
+
+    # ✅ ADD this block inside admin_edit_item, after the "short_description" block:
+    if "sub_category" in data:
+        updates_item["sub_category"] = empty_to_none(str(data.get("sub_category") or "").strip())
 
     if "is_veg" in data:
         updates_item["is_veg"] = 1 if str(data.get("is_veg") or "").strip().lower() in ("1", "true", "yes") else 0
@@ -3609,9 +3614,8 @@ def get_items(store_id):
 @app.route("/admin/menu-items", methods=["GET"])
 def admin_menu_items_list():
     store_id = safe_int(request.args.get("store_id", 0), 0)
-    section = (request.args.get("category") or "").strip()  # keep old param name category
+    section = (request.args.get("category") or "").strip()
 
-    # ✅ optional filters
     veg_q = request.args.get("is_veg", None)
     egg_q = request.args.get("is_egg", None)
 
@@ -3643,6 +3647,7 @@ def admin_menu_items_list():
               mi.store_id,
               mi.name,
               mi.description_short,
+              mi.sub_category,
               mi.image_url,
               mi.status,
               mi.is_veg,
@@ -3664,12 +3669,12 @@ def admin_menu_items_list():
             rr["variant_name"] = price_row["variant_name"] if price_row else "Regular"
             rr["image_url"] = resolve_image_url(rr.get("image_url"))
 
-            # compatibility keys (your old logic)
+            # ✅ rename keys for frontend compatibility
             rr["item_name"] = rr.pop("name")
             rr["short_description"] = rr.pop("description_short")
             rr["category"] = rr.pop("section_name") or ""
+            rr["sub_category"] = rr.get("sub_category") or ""  # ✅ fixed — no pop needed
 
-            # ✅ ensure returned
             rr["is_veg"] = int(rr.get("is_veg") or 0)
             rr["is_egg"] = int(rr.get("is_egg") or 0)
 
