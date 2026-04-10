@@ -1676,6 +1676,34 @@ def admin_meta_customers():
 
     return jsonify([{"id": r["customer_id"], "name": r.get("name"), "phone": r["phone"]} for r in rows]), 200
 
+@app.route("/admin/customer-address", methods=["GET"])
+def admin_customer_address():
+    customer_id = safe_int(request.args.get("customer_id", 0), 0)
+    if not customer_id:
+        return jsonify({"address": ""}), 200
+
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT address_line1, address_line2, city, state, pincode
+            FROM customer_addresses
+            WHERE customer_id = :cid
+            ORDER BY is_default DESC, address_id DESC
+            LIMIT 1
+        """), {"cid": customer_id}).mappings().first()
+
+    if not row:
+        return jsonify({"address": ""}), 200
+
+    parts = [
+        row.get("address_line1") or "",
+        row.get("address_line2") or "",
+        row.get("city") or "",
+        row.get("state") or "",
+        row.get("pincode") or "",
+    ]
+    address = ", ".join([p for p in parts if p.strip()])
+    return jsonify({"address": address}), 200
+
 # for notifications 
 # ❌ Your current code updates stores/riders tables directly
 # But customers use customer_fcm_tokens table
