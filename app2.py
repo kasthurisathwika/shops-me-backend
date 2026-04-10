@@ -5716,27 +5716,27 @@ def search_all():
 @app.route("/place-cart-order", methods=["POST"])
 def place_cart_order():
     data = request.json or {}
-
+ 
     customer_name = str(data.get("customer_name", "")).strip()
-    address_text = str(data.get("address", "")).strip()
-    phone_number = str(data.get("phone_number", "")).strip()
-    store_id = safe_int(data.get("store_id", 0), 0)
-
+    address_text  = str(data.get("address", "")).strip()
+    phone_number  = str(data.get("phone_number", "")).strip()
+    store_id      = safe_int(data.get("store_id", 0), 0)
+ 
     if not phone_number:
         return jsonify({"error": "phone_number is required"}), 400
     if store_id == 0:
         return jsonify({"error": "store_id is required"}), 400
-
+ 
     items = data.get("items", []) or []
     if not items:
         return jsonify({"error": "items required"}), 400
-
+ 
     with engine.begin() as conn:
         # ensure customer
         cust = conn.execute(text("""
             SELECT customer_id FROM customers WHERE phone = :ph LIMIT 1
         """), {"ph": phone_number}).mappings().first()
-
+ 
         if cust:
             customer_id = int(cust["customer_id"])
         else:
@@ -5745,8 +5745,8 @@ def place_cart_order():
                 VALUES (:name, :phone, 'ACTIVE')
             """), {"name": customer_name or None, "phone": phone_number})
             customer_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
-
-        # create address row (simple)
+ 
+        # create address row
         address_id = None
         if address_text:
             conn.execute(text("""
@@ -5760,123 +5760,254 @@ def place_cart_order():
                 "lng": data.get("lng"),
             })
             address_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
-
-        # compute totals from items
+ 
+        # compute totals
         subtotal = 0.0
         for it in items:
-            qty = safe_int(it.get("quantity", 1), 1)
+            qty   = safe_int(it.get("quantity", 1), 1)
             price = safe_float(it.get("price", 0), 0.0)
             subtotal += (price * qty)
-
-        # get packing charge from store
+ 
         st = conn.execute(text("""
             SELECT packing_charge FROM stores WHERE store_id = :sid
         """), {"sid": store_id}).mappings().first()
-        packing_charge = float(st.get("packing_charge") or 0.0) if st else 0.0
-
-        delivery_fee = safe_float(data.get("delivery_fee", 0), 0.0)
+        packing_charge  = float(st.get("packing_charge") or 0.0) if st else 0.0
+        delivery_fee    = safe_float(data.get("delivery_fee", 0), 0.0)
         discount_amount = safe_float(data.get("discount_amount", 0), 0.0)
-        tax_amount = safe_float(data.get("tax_amount", 0), 0.0)
-
-        grand_total = max(0.0, subtotal + packing_charge + delivery_fee + tax_amount - discount_amount)
-
-        # create order
+        tax_amount      = safe_float(data.get("tax_amount", 0), 0.0)
+        grand_total     = max(0.0, subtotal + packing_charge + delivery_fee + tax_amount - discount_amount)
+ 
+        # ✅ ONLINE order (customer app)
         conn.execute(text("""
             INSERT INTO orders
             (order_number, customer_id, store_id, delivery_address_id,
-            payment_method, payment_status, order_status, order_mode,
-            subtotal, packing_charge, delivery_fee, discount_amount, tax_amount, grand_total,
-            notes)
+             payment_method, payment_status, order_status, order_mode,
+             subtotal, packing_charge, delivery_fee, discount_amount, tax_amount, grand_total,
+             notes)
             VALUES
             ('TEMP', :cid, :sid, :addr,
-            :pm, 'PENDING', 'PLACED', :order_mode,
-            :subtotal, :packing, :delivery, :discount, :tax, :grand,
-            :notes)
+             :pm, 'PENDING', 'PLACED', 'ONLINE',
+             :subtotal, :packing, :delivery, :discount, :tax, :grand,
+             :notes)
         """), {
-            "cid": customer_id,
-            "sid": store_id,
-            "addr": address_id,
-            "pm": (data.get("payment_method") or "COD"),
-            "order_mode": order_mode,  # ✅ Accept from frontend
+            "cid":      customer_id,
+            "sid":      store_id,
+            "addr":     address_id,
+            "pm":       (data.get("payment_method") or "COD"),
             "subtotal": round(subtotal, 2),
-            "packing": round(packing_charge, 2),
+            "packing":  round(packing_charge, 2),
             "delivery": round(delivery_fee, 2),
             "discount": round(discount_amount, 2),
-            "tax": round(tax_amount, 2),
-            "grand": round(grand_total, 2),
-            "notes": empty_to_none(data.get("notes"))
+            "tax":      round(tax_amount, 2),
+            "grand":    round(grand_total, 2),
+            "notes":    empty_to_none(data.get("notes"))
         })
-
-        order_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
+ 
+        order_id     = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
         order_number = make_order_number(order_id)
-        order_mode = (data.get("order_mode") or "OFFLINE").upper()
-
-        if order_mode not in ["ONLINE", "OFFLINE"]:
-            order_mode = "OFFLINE"
-
-        conn.execute(text("""
-            UPDATE orders SET order_number = :onum WHERE order_id = :oid
-        """), {"onum": order_number, "oid": order_id})
-
-        # insert items
-        # insert items
+        conn.execute(text("UPDATE orders SET order_number = :onum WHERE order_id = :oid"),
+                     {"onum": order_number, "oid": order_id})
+ 
         for it in items:
-            qty = safe_int(it.get("quantity", 1), 1)
+            qty        = safe_int(it.get("quantity", 1), 1)
             unit_price = safe_float(it.get("price", 0), 0.0)
             line_total = round(unit_price * qty, 2)
-
-            item_name = str(it.get("product_name") or it.get("item_name") or "").strip()
-
+            item_name  = str(it.get("product_name") or it.get("item_name") or "").strip()
             menu_item_id = safe_int(it.get("menu_item_id", 0), 0)
-            variant_id = safe_int_or_none(it.get("variant_id"))
-
-            # ✅ If customer app didn't send menu_item_id, lookup by (store_id + name)
+            variant_id   = safe_int_or_none(it.get("variant_id"))
+ 
             if not menu_item_id:
                 row = conn.execute(text("""
-                    SELECT menu_item_id
-                    FROM menu_items
+                    SELECT menu_item_id FROM menu_items
                     WHERE store_id = :sid AND name = :nm
-                    ORDER BY menu_item_id DESC
-                    LIMIT 1
+                    ORDER BY menu_item_id DESC LIMIT 1
                 """), {"sid": store_id, "nm": item_name}).mappings().first()
-
                 if not row:
                     return jsonify({
-                        "error": "menu_item_id missing and item not found in menu_items",
-                        "store_id": store_id,
-                        "item_name": item_name
+                        "error": "menu_item_id missing and item not found",
+                        "store_id": store_id, "item_name": item_name
                     }), 400
-
                 menu_item_id = int(row["menu_item_id"])
-
+ 
             conn.execute(text("""
                 INSERT INTO order_items
                 (order_id, menu_item_id, variant_id,
-                item_name_snapshot, variant_name_snapshot,
-                unit_price, qty, line_total)
+                 item_name_snapshot, variant_name_snapshot,
+                 unit_price, qty, line_total)
                 VALUES
-                (:oid, :mid, :vid,
-                :iname, :vname,
-                :unit_price, :qty, :line_total)
+                (:oid, :mid, :vid, :iname, :vname, :unit_price, :qty, :line_total)
             """), {
-                "oid": order_id,
-                "mid": menu_item_id,   # ✅ always valid now
-                "vid": variant_id,
+                "oid": order_id, "mid": menu_item_id, "vid": variant_id,
                 "iname": item_name or "Item",
                 "vname": empty_to_none(it.get("variant_name")),
                 "unit_price": round(unit_price, 2),
-                "qty": qty,
+                "qty": qty, "line_total": line_total
+            })
+ 
+        _create_order_notification_for_customer(conn, order_id, "PLACED")
+ 
+    return jsonify({
+        "message": "✅ Cart Order Placed Successfully",
+        "order_id": order_id,
+        "order_number": order_number,
+        "order_mode": "ONLINE"
+    }), 201
+
+# ================================================================
+# Add NEW route /admin/new-sale in app.py
+#          (Admin panel → always OFFLINE)
+# ================================================================
+ 
+ 
+@app.route("/admin/new-sale", methods=["POST"])
+def admin_new_sale():
+    """
+    Admin places a manual / walk-in order from the New Sale page.
+    order_mode = OFFLINE always.
+    """
+    data = request.json or {}
+ 
+    store_id      = safe_int(data.get("store_id", 0), 0)
+    customer_name = str(data.get("customer_name") or "Walk-in Customer").strip()
+    phone_number  = str(data.get("phone_number") or data.get("phone") or "").strip()
+    address_text  = str(data.get("address") or "").strip()
+    notes         = empty_to_none(data.get("notes"))
+    payment_method = str(data.get("payment_method") or "CASH").strip().upper()
+    payment_status = str(data.get("payment_status") or "PAID").strip().upper()
+ 
+    if store_id == 0:
+        return jsonify({"error": "store_id is required"}), 400
+ 
+    items = data.get("items", []) or []
+    if not items:
+        return jsonify({"error": "items required"}), 400
+ 
+    with engine.begin() as conn:
+        # ✅ get or create customer (phone optional for walk-in)
+        customer_id = None
+ 
+        if phone_number:
+            cust = conn.execute(text("""
+                SELECT customer_id FROM customers WHERE phone = :ph LIMIT 1
+            """), {"ph": phone_number}).mappings().first()
+ 
+            if cust:
+                customer_id = int(cust["customer_id"])
+            else:
+                conn.execute(text("""
+                    INSERT INTO customers (name, phone, status)
+                    VALUES (:name, :phone, 'ACTIVE')
+                """), {"name": customer_name, "phone": phone_number})
+                customer_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
+        else:
+            # Walk-in with no phone — create anonymous customer
+            conn.execute(text("""
+                INSERT INTO customers (name, phone, status)
+                VALUES (:name, NULL, 'ACTIVE')
+            """), {"name": customer_name})
+            customer_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
+ 
+        # ✅ address (optional for walk-in)
+        address_id = None
+        if address_text:
+            conn.execute(text("""
+                INSERT INTO customer_addresses
+                (customer_id, label, address_line1, is_default)
+                VALUES (:cid, 'Walk-in', :a1, 0)
+            """), {"cid": customer_id, "a1": address_text})
+            address_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
+ 
+        # ✅ compute totals
+        subtotal = 0.0
+        for it in items:
+            qty   = safe_int(it.get("quantity", 1), 1)
+            price = safe_float(it.get("price", 0), 0.0)
+            subtotal += (price * qty)
+ 
+        discount_amount = safe_float(data.get("discount_amount", 0), 0.0)
+        tax_amount      = safe_float(data.get("tax_amount", 0), 0.0)
+        packing_charge  = safe_float(data.get("packing_charge", 0), 0.0)
+        grand_total     = max(0.0, subtotal + packing_charge + tax_amount - discount_amount)
+ 
+        # ✅ OFFLINE order (admin new sale)
+        conn.execute(text("""
+            INSERT INTO orders
+            (order_number, customer_id, store_id, delivery_address_id,
+             payment_method, payment_status, order_status, order_mode,
+             subtotal, packing_charge, delivery_fee, discount_amount, tax_amount, grand_total,
+             notes)
+            VALUES
+            ('TEMP', :cid, :sid, :addr,
+             :pm, :pstatus, 'PLACED', 'OFFLINE',
+             :subtotal, :packing, 0, :discount, :tax, :grand,
+             :notes)
+        """), {
+            "cid":      customer_id,
+            "sid":      store_id,
+            "addr":     address_id,
+            "pm":       payment_method,
+            "pstatus":  payment_status,
+            "subtotal": round(subtotal, 2),
+            "packing":  round(packing_charge, 2),
+            "discount": round(discount_amount, 2),
+            "tax":      round(tax_amount, 2),
+            "grand":    round(grand_total, 2),
+            "notes":    notes
+        })
+ 
+        order_id     = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
+        order_number = make_order_number(order_id)
+        conn.execute(text("UPDATE orders SET order_number = :onum WHERE order_id = :oid"),
+                     {"onum": order_number, "oid": order_id})
+ 
+        # ✅ insert order items
+        for it in items:
+            qty        = safe_int(it.get("quantity", 1), 1)
+            unit_price = safe_float(it.get("price", 0), 0.0)
+            line_total = round(unit_price * qty, 2)
+            item_name  = str(it.get("product_name") or it.get("item_name") or it.get("name") or "").strip()
+            menu_item_id = safe_int(it.get("menu_item_id", 0), 0)
+            variant_id   = safe_int_or_none(it.get("variant_id"))
+ 
+            if not menu_item_id:
+                row = conn.execute(text("""
+                    SELECT menu_item_id FROM menu_items
+                    WHERE store_id = :sid AND name = :nm
+                    ORDER BY menu_item_id DESC LIMIT 1
+                """), {"sid": store_id, "nm": item_name}).mappings().first()
+                if not row:
+                    return jsonify({
+                        "error": f"Item '{item_name}' not found in store",
+                        "store_id": store_id
+                    }), 400
+                menu_item_id = int(row["menu_item_id"])
+ 
+            conn.execute(text("""
+                INSERT INTO order_items
+                (order_id, menu_item_id, variant_id,
+                 item_name_snapshot, variant_name_snapshot,
+                 unit_price, qty, line_total)
+                VALUES
+                (:oid, :mid, :vid, :iname, :vname, :unit_price, :qty, :line_total)
+            """), {
+                "oid":        order_id,
+                "mid":        menu_item_id,
+                "vid":        variant_id,
+                "iname":      item_name or "Item",
+                "vname":      empty_to_none(it.get("variant_name")),
+                "unit_price": round(unit_price, 2),
+                "qty":        qty,
                 "line_total": line_total
             })
-
-        _create_order_notification_for_customer(conn, order_id, "PLACED")
-
-        return jsonify({
-            "message": "✅ Cart Order Placed Successfully",
-            "order_id": order_id,
-            "order_number": order_number
-        }), 201
-
+ 
+    return jsonify({
+        "message": "✅ Order Placed Successfully",
+        "order_id":     order_id,
+        "order_number": order_number,
+        "order_mode":   "OFFLINE",
+        "grand_total":  round(grand_total, 2)
+    }), 201
+ 
 
 # ======================
 # ADMIN → GET FULL ORDERS (updated)
@@ -5887,19 +6018,20 @@ def get_full_orders():
     with engine.connect() as conn:
         orders_rows = conn.execute(text("""
             SELECT
-            o.order_id, o.order_number, o.store_id, o.customer_id,
-            o.subtotal, o.grand_total, o.order_status, o.order_mode, o.created_at,
-            o.notes,
-            c.name AS customer_name, c.phone AS phone_number,
-            ca.address_line1 AS address,
-            s.store_name AS store_name
+              o.order_id, o.order_number, o.store_id, o.customer_id,
+              o.subtotal, o.grand_total, o.order_status,
+              o.order_mode,
+              o.created_at, o.notes,
+              c.name AS customer_name, c.phone AS phone_number,
+              ca.address_line1 AS address,
+              s.store_name AS store_name
             FROM orders o
             LEFT JOIN customers c ON c.customer_id = o.customer_id
             LEFT JOIN customer_addresses ca ON ca.address_id = o.delivery_address_id
             LEFT JOIN stores s ON s.store_id = o.store_id
             ORDER BY o.order_id DESC
         """)).mappings().all()
-
+ 
         items_rows = conn.execute(text("""
             SELECT
               oi.order_id,
@@ -5909,33 +6041,33 @@ def get_full_orders():
             FROM order_items oi
             ORDER BY oi.order_id DESC
         """)).mappings().all()
-
+ 
     items_by_order = {}
     for it in items_rows:
         items_by_order.setdefault(int(it["order_id"]), []).append({
             "product_name": it.get("product_name", ""),
-            "price": float(it.get("price") or 0),
-            "quantity": int(it.get("quantity") or 0),
+            "price":        float(it.get("price") or 0),
+            "quantity":     int(it.get("quantity") or 0),
         })
-
+ 
     out = []
     for o in orders_rows:
         out.append({
-            "order_id": int(o["order_id"]),
+            "order_id":     int(o["order_id"]),
             "order_number": o.get("order_number") or "",
-            "order_mode": str(o.get("order_mode") or "OFFLINE"),  # ✅ ADDED
-            "store_id": int(o.get("store_id") or 0),
-            "store_name": o.get("store_name") or "",      # ✅ added
+            "store_id":     int(o.get("store_id") or 0),
+            "store_name":   o.get("store_name") or "",
             "customer_name": o.get("customer_name") or "",
             "phone_number": o.get("phone_number") or "",
-            "address": o.get("address") or "",
-            "total_price": float(o.get("grand_total") or 0),
-            "date": o["created_at"].strftime("%Y-%m-%d %H:%M") if o.get("created_at") else "",
-            "status": str(o.get("order_status") or "PLACED"),
-            "notes": o.get("notes") or "",                # ✅ added (your UI uses o.notes)
-            "items": items_by_order.get(int(o["order_id"]), [])
+            "address":      o.get("address") or "",
+            "total_price":  float(o.get("grand_total") or 0),
+            "date":         o["created_at"].strftime("%Y-%m-%d %H:%M") if o.get("created_at") else "",
+            "status":       str(o.get("order_status") or "PLACED"),
+            "order_mode":   str(o.get("order_mode") or "ONLINE"),   # ✅ ONLINE or OFFLINE
+            "notes":        o.get("notes") or "",
+            "items":        items_by_order.get(int(o["order_id"]), [])
         })
-
+ 
     return jsonify(out), 200
 
 @app.route("/vendor/orders", methods=["GET"])
