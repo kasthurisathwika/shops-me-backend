@@ -3406,56 +3406,46 @@ def admin_add_item():
 def admin_edit_item(menu_item_id):
     is_multipart = request.content_type and "multipart/form-data" in request.content_type
     data = request.form if is_multipart else (request.json or {})
- 
+
     updates_item = {}
     updates_variant = {}
- 
+
     if "item_name" in data or "name" in data:
-        updates_item["name"] = empty_to_none(
-            str(data.get("item_name") or data.get("name") or "").strip()
-        )
- 
+        updates_item["name"] = empty_to_none(str(data.get("item_name") or data.get("name") or "").strip())
+
     if "short_description" in data:
-        updates_item["description_short"] = empty_to_none(
-            str(data.get("short_description") or "").strip()
-        )
- 
-    # ── FIX: only write sub_category when a non-empty value is sent ──
-    # If the key is present but the value is blank (""), we skip the
-    # update entirely so we don't accidentally NULL-out an existing value.
+        updates_item["description_short"] = empty_to_none(str(data.get("short_description") or "").strip())
+    
+    # ✅ ADD THIS
     if "sub_category" in data:
-        sc_val = str(data.get("sub_category") or "").strip()
-        if sc_val:                              # non-empty → save it
-            updates_item["sub_category"] = sc_val
-        # empty string → do NOT add to updates_item (preserves DB value)
- 
+        updates_item["sub_category"] = empty_to_none(str(data.get("sub_category") or "").strip())
+
+    if "category" in data or "section_name" in data:
+        # will map to section_id
+        pass
+
     if "is_veg" in data:
-        updates_item["is_veg"] = (
-            1 if str(data.get("is_veg") or "").strip().lower() in ("1","true","yes") else 0
-        )
+        updates_item["is_veg"] = 1 if str(data.get("is_veg") or "").strip().lower() in ("1", "true", "yes") else 0
     if "is_egg" in data:
-        updates_item["is_egg"] = (
-            1 if str(data.get("is_egg") or "").strip().lower() in ("1","true","yes") else 0
-        )
- 
+        updates_item["is_egg"] = 1 if str(data.get("is_egg") or "").strip().lower() in ("1", "true", "yes") else 0
+
     if "status" in data:
         st = str(data.get("status") or "").strip().lower()
-        if st in ("active","1","true","yes"):
+        # accept old 'active/inactive'
+        if st in ("active", "1", "true", "yes"):
             updates_item["status"] = "ACTIVE"
-        elif st in ("out_of_stock","outofstock"):
+        elif st in ("out_of_stock", "outofstock"):
             updates_item["status"] = "OUT_OF_STOCK"
         else:
             updates_item["status"] = "INACTIVE"
- 
-    # price / variant
+
+    # price/variant updates (update first ACTIVE variant)
     if "price" in data:
         updates_variant["price"] = safe_float(data.get("price"), 0.0)
     if "variant_name" in data:
-        updates_variant["variant_name"] = empty_to_none(
-            str(data.get("variant_name") or "").strip()
-        )
- 
-    # image
+        updates_variant["variant_name"] = empty_to_none(str(data.get("variant_name") or "").strip())
+
+    # image logic
     try:
         if is_multipart and "image" in request.files:
             f = request.files["image"]
@@ -3471,45 +3461,42 @@ def admin_edit_item(menu_item_id):
                 gcs_path = upload_file_to_gcs(f, folder=f"menu_items/{store_id}")
                 updates_item["image_url"] = gcs_path
         else:
+            # explicit image_url
             if "image_url" in data:
-                updates_item["image_url"] = empty_to_none(
-                    str(data.get("image_url") or "").strip()
-                )
+                updates_item["image_url"] = empty_to_none(str(data.get("image_url") or "").strip())
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
         return jsonify({"error": f"GCS upload failed: {str(e)}"}), 500
- 
+
     with engine.begin() as conn:
         base = conn.execute(text("""
             SELECT store_id FROM menu_items WHERE menu_item_id = :mid
         """), {"mid": menu_item_id}).mappings().first()
         if not base:
             return jsonify({"error": "Item Not Found"}), 404
- 
+
         store_id = int(base["store_id"])
- 
-        # category → section_id mapping
+
+        # category -> section
         if "category" in data or "section_name" in data:
-            section_name = (
-                empty_to_none(data.get("category"))
-                or empty_to_none(data.get("section_name"))
-            )
+            section_name = empty_to_none(data.get("category")) or empty_to_none(data.get("section_name"))
             if section_name:
                 section_id = get_or_create_section(conn, store_id, section_name)
                 updates_item["section_id"] = section_id
- 
+
+        # update menu_items
         if updates_item:
             updates_item["mid"] = menu_item_id
-            set_clause = ", ".join(
-                [f"{k} = :{k}" for k in updates_item.keys() if k != "mid"]
-            )
+            set_clause = ", ".join([f"{k} = :{k}" for k in updates_item.keys() if k != "mid"])
             conn.execute(
                 text(f"UPDATE menu_items SET {set_clause} WHERE menu_item_id = :mid"),
                 updates_item
             )
- 
+
+        # update variant (first ACTIVE)
         if updates_variant:
+            # find active variant
             v = conn.execute(text("""
                 SELECT variant_id
                 FROM menu_item_variants
@@ -3517,23 +3504,18 @@ def admin_edit_item(menu_item_id):
                 ORDER BY variant_id ASC
                 LIMIT 1
             """), {"mid": menu_item_id}).mappings().first()
- 
+
             if v:
                 updates_variant["vid"] = int(v["variant_id"])
-                setv = ", ".join(
-                    [f"{k} = :{k}" for k in updates_variant.keys() if k != "vid"]
-                )
+                setv = ", ".join([f"{k} = :{k}" for k in updates_variant.keys() if k != "vid"])
                 conn.execute(
                     text(f"UPDATE menu_item_variants SET {setv} WHERE variant_id = :vid"),
                     updates_variant
                 )
- 
+
     return jsonify({
         "message": "Item Updated",
-        "image_url": (
-            resolve_image_url(updates_item.get("image_url"))
-            if updates_item.get("image_url") else ""
-        )
+        "image_url": resolve_image_url(updates_item.get("image_url")) if updates_item.get("image_url") else ""
     }), 200
 
 @app.route("/admin/delete-item/<int:menu_item_id>", methods=["DELETE"])
