@@ -5797,7 +5797,7 @@ def place_cart_order():
             "sid": store_id,
             "addr": address_id,
             "pm": (data.get("payment_method") or "COD"),
-            "order_mode": data.get("order_mode", "OFFLINE").upper(),  # ✅ Accept from frontend
+            "order_mode": order_mode,  # ✅ Accept from frontend
             "subtotal": round(subtotal, 2),
             "packing": round(packing_charge, 2),
             "delivery": round(delivery_fee, 2),
@@ -5809,6 +5809,10 @@ def place_cart_order():
 
         order_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
         order_number = make_order_number(order_id)
+        order_mode = (data.get("order_mode") or "OFFLINE").upper()
+
+        if order_mode not in ["ONLINE", "OFFLINE"]:
+            order_mode = "OFFLINE"
 
         conn.execute(text("""
             UPDATE orders SET order_number = :onum WHERE order_id = :oid
