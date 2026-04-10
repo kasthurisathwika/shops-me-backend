@@ -5784,19 +5784,20 @@ def place_cart_order():
         conn.execute(text("""
             INSERT INTO orders
             (order_number, customer_id, store_id, delivery_address_id,
-             payment_method, payment_status, order_status,
-             subtotal, packing_charge, delivery_fee, discount_amount, tax_amount, grand_total,
-             notes)
+            payment_method, payment_status, order_status, order_mode,
+            subtotal, packing_charge, delivery_fee, discount_amount, tax_amount, grand_total,
+            notes)
             VALUES
             ('TEMP', :cid, :sid, :addr,
-             :pm, 'PENDING', 'PLACED',
-             :subtotal, :packing, :delivery, :discount, :tax, :grand,
-             :notes)
+            :pm, 'PENDING', 'PLACED', :order_mode,
+            :subtotal, :packing, :delivery, :discount, :tax, :grand,
+            :notes)
         """), {
             "cid": customer_id,
             "sid": store_id,
             "addr": address_id,
             "pm": (data.get("payment_method") or "COD"),
+            "order_mode": data.get("order_mode", "OFFLINE").upper(),  # ✅ Accept from frontend
             "subtotal": round(subtotal, 2),
             "packing": round(packing_charge, 2),
             "delivery": round(delivery_fee, 2),
@@ -5882,12 +5883,12 @@ def get_full_orders():
     with engine.connect() as conn:
         orders_rows = conn.execute(text("""
             SELECT
-              o.order_id, o.order_number, o.store_id, o.customer_id,
-              o.subtotal, o.grand_total, o.order_status, o.created_at,
-              o.notes,
-              c.name AS customer_name, c.phone AS phone_number,
-              ca.address_line1 AS address,
-              s.store_name AS store_name
+            o.order_id, o.order_number, o.store_id, o.customer_id,
+            o.subtotal, o.grand_total, o.order_status, o.order_mode, o.created_at,
+            o.notes,
+            c.name AS customer_name, c.phone AS phone_number,
+            ca.address_line1 AS address,
+            s.store_name AS store_name
             FROM orders o
             LEFT JOIN customers c ON c.customer_id = o.customer_id
             LEFT JOIN customer_addresses ca ON ca.address_id = o.delivery_address_id
@@ -5918,6 +5919,7 @@ def get_full_orders():
         out.append({
             "order_id": int(o["order_id"]),
             "order_number": o.get("order_number") or "",
+            "order_mode": str(o.get("order_mode") or "OFFLINE"),  # ✅ ADDED
             "store_id": int(o.get("store_id") or 0),
             "store_name": o.get("store_name") or "",      # ✅ added
             "customer_name": o.get("customer_name") or "",
