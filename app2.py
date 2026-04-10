@@ -1587,9 +1587,9 @@ def _notif_row_to_api(r):
 
 
 # preflight support (important for POST/PUT multipart)
-@app.route("/admin/<path:path>", methods=["OPTIONS"])
-def admin_preflight(path):
-    return ("", 204)
+#@app.route("/admin/<path:path>", methods=["OPTIONS"])
+#def admin_preflight(path):
+    #return ("", 204)
 
 # =========================================================
 #  A) DYNAMIC DROPDOWNS
