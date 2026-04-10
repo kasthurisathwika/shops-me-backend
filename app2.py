@@ -3332,18 +3332,18 @@ def get_active_variant_price(conn, menu_item_id: int):
 def admin_add_item():
     is_multipart = request.content_type and "multipart/form-data" in request.content_type
     data = request.form if is_multipart else (request.json or {})
-
+ 
     store_id = safe_int(data.get("store_id", 0), 0)
     if store_id == 0:
         return jsonify({"error": "Invalid store_id"}), 400
-
+ 
     item_name = str(data.get("item_name") or data.get("name") or "").strip()
     if not item_name:
         return jsonify({"error": "item_name is required"}), 400
-
-    # old "category" -> section name
+ 
+    # category -> section name
     section_name = empty_to_none(data.get("category")) or empty_to_none(data.get("section_name"))
-
+ 
     # image
     image_url_value = empty_to_none(data.get("image_url"))
     try:
@@ -3355,97 +3355,145 @@ def admin_add_item():
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
         return jsonify({"error": f"GCS upload failed: {str(e)}"}), 500
-
+ 
     price = safe_float(data.get("price"), 0.0)
     variant_name = str(data.get("variant_name") or "Regular").strip() or "Regular"
-
+ 
     is_veg = 1 if str(data.get("is_veg") or "").strip().lower() in ("1", "true", "yes") else 0
     is_egg = 1 if str(data.get("is_egg") or "").strip().lower() in ("1", "true", "yes") else 0
-
+ 
+    # ✅ All new fields
+    sub_category_val       = empty_to_none(data.get("sub_category"))
+    unit_val               = empty_to_none(data.get("unit"))
+    weight_val             = empty_to_none(data.get("weight"))
+    stock_val              = safe_int(data.get("stock", 0), 0)
+    total_stock_val        = safe_int(data.get("total_stock", 0), 0)
+    max_qty_val            = safe_int(data.get("max_purchase_qty_limit", 0), 0)
+    tags_val               = empty_to_none(data.get("tags"))
+    commission_type_val    = str(data.get("admin_commission_type") or "percentage").strip() or "percentage"
+    commission_val         = safe_float(data.get("admin_commission", 0), 0.0)
+ 
     with engine.begin() as conn:
         # ensure store exists
         st = conn.execute(text("SELECT store_id FROM stores WHERE store_id = :sid"), {"sid": store_id}).mappings().first()
         if not st:
             return jsonify({"error": "Store not found"}), 404
-
+ 
         section_id = get_or_create_section(conn, store_id, section_name) if section_name else None
-        sub_category_val = empty_to_none(data.get("sub_category"))
-
+ 
         conn.execute(text("""
             INSERT INTO menu_items
-            (store_id, section_id, name, description_short, sub_category, image_url, is_veg, is_egg, status, sort_order)
+            (store_id, section_id, name, description_short,
+             sub_category, unit, weight, stock, total_stock,
+             max_purchase_qty_limit, tags,
+             admin_commission_type, admin_commission,
+             image_url, is_veg, is_egg, status, sort_order)
             VALUES
-            (:store_id, :section_id, :name, :desc, :sub_category, :image_url, :is_veg, :is_egg, 'ACTIVE', 0)
+            (:store_id, :section_id, :name, :desc,
+             :sub_category, :unit, :weight, :stock, :total_stock,
+             :max_qty, :tags,
+             :commission_type, :commission,
+             :image_url, :is_veg, :is_egg, 'ACTIVE', 0)
         """), {
-            "store_id": store_id,
-            "section_id": section_id,
-            "name": item_name,
-            "desc": empty_to_none(data.get("short_description")),
-            "sub_category": sub_category_val,
-            "image_url": empty_to_none(image_url_value),
-            "is_veg": is_veg,
-            "is_egg": is_egg,
+            "store_id":        store_id,
+            "section_id":      section_id,
+            "name":            item_name,
+            "desc":            empty_to_none(data.get("short_description")),
+            "sub_category":    sub_category_val,
+            "unit":            unit_val,
+            "weight":          weight_val,
+            "stock":           stock_val,
+            "total_stock":     total_stock_val,
+            "max_qty":         max_qty_val,
+            "tags":            tags_val,
+            "commission_type": commission_type_val,
+            "commission":      commission_val,
+            "image_url":       empty_to_none(image_url_value),
+            "is_veg":          is_veg,
+            "is_egg":          is_egg,
         })
-
+ 
         menu_item_id = int(conn.execute(text("SELECT LAST_INSERT_ID() AS id")).mappings().first()["id"])
-
+ 
         # default variant (price)
         conn.execute(text("""
             INSERT INTO menu_item_variants (menu_item_id, variant_name, price, status)
             VALUES (:mid, :vname, :price, 'ACTIVE')
         """), {"mid": menu_item_id, "vname": variant_name, "price": price})
-
+ 
     return jsonify({
         "message": "Item Added Successfully",
         "menu_item_id": menu_item_id,
         "image_url": resolve_image_url(image_url_value) if image_url_value else ""
     }), 201
 
-
 @app.route("/admin/edit-item/<int:menu_item_id>", methods=["PUT"])
 def admin_edit_item(menu_item_id):
     is_multipart = request.content_type and "multipart/form-data" in request.content_type
     data = request.form if is_multipart else (request.json or {})
-
+ 
     updates_item = {}
     updates_variant = {}
-
+ 
+    # ✅ Basic fields
     if "item_name" in data or "name" in data:
         updates_item["name"] = empty_to_none(str(data.get("item_name") or data.get("name") or "").strip())
-
+ 
     if "short_description" in data:
         updates_item["description_short"] = empty_to_none(str(data.get("short_description") or "").strip())
-    
-    # ✅ ADD THIS
+ 
     if "sub_category" in data:
         updates_item["sub_category"] = empty_to_none(str(data.get("sub_category") or "").strip())
-
+ 
+    # ✅ New fields
+    if "unit" in data:
+        updates_item["unit"] = empty_to_none(str(data.get("unit") or "").strip())
+ 
+    if "weight" in data:
+        updates_item["weight"] = empty_to_none(str(data.get("weight") or "").strip())
+ 
+    if "stock" in data:
+        updates_item["stock"] = safe_int(data.get("stock", 0), 0)
+ 
+    if "total_stock" in data:
+        updates_item["total_stock"] = safe_int(data.get("total_stock", 0), 0)
+ 
+    if "max_purchase_qty_limit" in data:
+        updates_item["max_purchase_qty_limit"] = safe_int(data.get("max_purchase_qty_limit", 0), 0)
+ 
+    if "tags" in data:
+        updates_item["tags"] = empty_to_none(str(data.get("tags") or "").strip())
+ 
+    if "admin_commission_type" in data:
+        updates_item["admin_commission_type"] = str(data.get("admin_commission_type") or "percentage").strip() or "percentage"
+ 
+    if "admin_commission" in data:
+        updates_item["admin_commission"] = safe_float(data.get("admin_commission", 0), 0.0)
+ 
     if "category" in data or "section_name" in data:
-        # will map to section_id
-        pass
-
+        pass  # handled below via get_or_create_section
+ 
     if "is_veg" in data:
         updates_item["is_veg"] = 1 if str(data.get("is_veg") or "").strip().lower() in ("1", "true", "yes") else 0
     if "is_egg" in data:
         updates_item["is_egg"] = 1 if str(data.get("is_egg") or "").strip().lower() in ("1", "true", "yes") else 0
-
+ 
     if "status" in data:
         st = str(data.get("status") or "").strip().lower()
-        # accept old 'active/inactive'
         if st in ("active", "1", "true", "yes"):
             updates_item["status"] = "ACTIVE"
         elif st in ("out_of_stock", "outofstock"):
             updates_item["status"] = "OUT_OF_STOCK"
         else:
             updates_item["status"] = "INACTIVE"
-
-    # price/variant updates (update first ACTIVE variant)
+ 
+    # ✅ Price / variant
     if "price" in data:
         updates_variant["price"] = safe_float(data.get("price"), 0.0)
     if "variant_name" in data:
         updates_variant["variant_name"] = empty_to_none(str(data.get("variant_name") or "").strip())
-
-    # image logic
+ 
+    # ✅ Image
     try:
         if is_multipart and "image" in request.files:
             f = request.files["image"]
@@ -3461,31 +3509,30 @@ def admin_edit_item(menu_item_id):
                 gcs_path = upload_file_to_gcs(f, folder=f"menu_items/{store_id}")
                 updates_item["image_url"] = gcs_path
         else:
-            # explicit image_url
             if "image_url" in data:
                 updates_item["image_url"] = empty_to_none(str(data.get("image_url") or "").strip())
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
         return jsonify({"error": f"GCS upload failed: {str(e)}"}), 500
-
+ 
     with engine.begin() as conn:
         base = conn.execute(text("""
             SELECT store_id FROM menu_items WHERE menu_item_id = :mid
         """), {"mid": menu_item_id}).mappings().first()
         if not base:
             return jsonify({"error": "Item Not Found"}), 404
-
+ 
         store_id = int(base["store_id"])
-
-        # category -> section
+ 
+        # ✅ category -> section
         if "category" in data or "section_name" in data:
             section_name = empty_to_none(data.get("category")) or empty_to_none(data.get("section_name"))
             if section_name:
                 section_id = get_or_create_section(conn, store_id, section_name)
                 updates_item["section_id"] = section_id
-
-        # update menu_items
+ 
+        # ✅ update menu_items
         if updates_item:
             updates_item["mid"] = menu_item_id
             set_clause = ", ".join([f"{k} = :{k}" for k in updates_item.keys() if k != "mid"])
@@ -3493,10 +3540,9 @@ def admin_edit_item(menu_item_id):
                 text(f"UPDATE menu_items SET {set_clause} WHERE menu_item_id = :mid"),
                 updates_item
             )
-
-        # update variant (first ACTIVE)
+ 
+        # ✅ update variant (first ACTIVE)
         if updates_variant:
-            # find active variant
             v = conn.execute(text("""
                 SELECT variant_id
                 FROM menu_item_variants
@@ -3504,7 +3550,7 @@ def admin_edit_item(menu_item_id):
                 ORDER BY variant_id ASC
                 LIMIT 1
             """), {"mid": menu_item_id}).mappings().first()
-
+ 
             if v:
                 updates_variant["vid"] = int(v["variant_id"])
                 setv = ", ".join([f"{k} = :{k}" for k in updates_variant.keys() if k != "vid"])
@@ -3512,7 +3558,14 @@ def admin_edit_item(menu_item_id):
                     text(f"UPDATE menu_item_variants SET {setv} WHERE variant_id = :vid"),
                     updates_variant
                 )
-
+            else:
+                # ✅ no variant exists — create one
+                price = updates_variant.get("price", 0.0)
+                conn.execute(text("""
+                    INSERT INTO menu_item_variants (menu_item_id, variant_name, price, status)
+                    VALUES (:mid, 'Regular', :price, 'ACTIVE')
+                """), {"mid": menu_item_id, "price": price})
+ 
     return jsonify({
         "message": "Item Updated",
         "image_url": resolve_image_url(updates_item.get("image_url")) if updates_item.get("image_url") else ""
@@ -3614,31 +3667,31 @@ def get_items(store_id):
 def admin_menu_items_list():
     store_id = safe_int(request.args.get("store_id", 0), 0)
     section = (request.args.get("category") or "").strip()
-
+ 
     veg_q = request.args.get("is_veg", None)
     egg_q = request.args.get("is_egg", None)
-
+ 
     where = []
     params = {}
-
+ 
     if store_id:
         where.append("mi.store_id = :sid")
         params["sid"] = store_id
-
+ 
     if section:
         where.append("ms.name = :sec")
         params["sec"] = section
-
+ 
     if veg_q is not None and str(veg_q).strip() != "":
         where.append("mi.is_veg = :veg")
         params["veg"] = parse_bool_int(veg_q, 0)
-
+ 
     if egg_q is not None and str(egg_q).strip() != "":
         where.append("mi.is_egg = :egg")
         params["egg"] = parse_bool_int(egg_q, 0)
-
+ 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-
+ 
     with engine.connect() as conn:
         rows = conn.execute(text(f"""
             SELECT
@@ -3647,6 +3700,14 @@ def admin_menu_items_list():
               mi.name,
               mi.description_short,
               mi.sub_category,
+              mi.unit,
+              mi.weight,
+              mi.stock,
+              mi.total_stock,
+              mi.max_purchase_qty_limit,
+              mi.tags,
+              mi.admin_commission_type,
+              mi.admin_commission,
               mi.image_url,
               mi.status,
               mi.is_veg,
@@ -3659,26 +3720,35 @@ def admin_menu_items_list():
             {where_sql}
             ORDER BY mi.menu_item_id DESC
         """), params).mappings().all()
-
+ 
         out = []
         for r in rows:
             rr = dict(r)
             price_row = get_active_variant_price(conn, int(rr["menu_item_id"]))
-            rr["price"] = float(price_row["price"]) if price_row else 0.0
+            rr["price"]        = float(price_row["price"]) if price_row else 0.0
             rr["variant_name"] = price_row["variant_name"] if price_row else "Regular"
-            rr["image_url"] = resolve_image_url(rr.get("image_url"))
-
+            rr["image_url"]    = resolve_image_url(rr.get("image_url"))
+ 
             # ✅ rename keys for frontend compatibility
-            rr["item_name"] = rr.pop("name")
+            rr["item_name"]         = rr.pop("name")
             rr["short_description"] = rr.pop("description_short")
-            rr["category"] = rr.pop("section_name") or ""
-            rr["sub_category"] = rr.get("sub_category") or ""  # ✅ fixed — no pop needed
-
-            rr["is_veg"] = int(rr.get("is_veg") or 0)
-            rr["is_egg"] = int(rr.get("is_egg") or 0)
-
+            rr["category"]          = rr.pop("section_name") or ""
+ 
+            # ✅ all fields with safe defaults
+            rr["sub_category"]             = rr.get("sub_category") or ""
+            rr["unit"]                     = rr.get("unit") or ""
+            rr["weight"]                   = rr.get("weight") or ""
+            rr["stock"]                    = int(rr.get("stock") or 0)
+            rr["total_stock"]              = int(rr.get("total_stock") or 0)
+            rr["max_purchase_qty_limit"]   = int(rr.get("max_purchase_qty_limit") or 0)
+            rr["tags"]                     = rr.get("tags") or ""
+            rr["admin_commission_type"]    = rr.get("admin_commission_type") or "percentage"
+            rr["admin_commission"]         = float(rr.get("admin_commission") or 0)
+            rr["is_veg"]                   = int(rr.get("is_veg") or 0)
+            rr["is_egg"]                   = int(rr.get("is_egg") or 0)
+ 
             out.append(rr)
-
+ 
     return jsonify(out), 200
 
 @app.route("/meta/categories", methods=["GET"])
